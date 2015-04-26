@@ -1,0 +1,139 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Saurabh"
+date: "Monday, April 27, 2015"
+output: html_document
+---
+
+==========================================================
+
+
+## Introduction
+
+
+For this assignment I analyzed the data to determine what class of activity an individual performed. To do this I made use of caret and rpart and randomForest, this allowed me to generate correct answers for each of the 20 test data cases provided in this assignment.  I made use of a seed value for consistent results.
+
+### Setting up data
+
+```{r}
+setwd("~/Coursera Stuff/pracmaclrn")
+#download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","training.csv",method="curl")
+#download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","testing.csv",method="curl")
+```
+
+Data can be downloaded from the above links and named appropriately
+
+### Preprocessing 
+```{r}
+library(caret)
+library(rpart)
+library(randomForest)
+traindata<-read.csv("training.csv", na.strings=c("", "NA", "NULL")) ##recognize nulls
+testdata<-read.csv("test.csv", na.strings=c("", "NA", "NULL"))
+dim(traindata)
+table(colSums(is.na(traindata)))
+```
+That will load all required libraries and read in the data.
+We can see the dimensionality of the data and also see that there are columns with a few NA values and 60 columns with no NA values. Let's extract them
+```{r}
+f<-function(x)
+{y<-x
+ z<-c()
+ for (i in 1:dim(x)[2])
+ {
+   if (sum(is.na(x[,i]))>0) ##Check condition for NA values
+   {     z<-append(z,i)     ##Store indexes
+         y<-y[,-which(colnames(y)==colnames(x)[i])]; ##remove columns
+   }
+ }
+ list(z,y) ## return index,data
+}
+index<-unlist(f(traindata)[1])
+trainout<-(f(traindata)[2])[[1]]
+remove = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+trainout <- trainout[, -which(names(trainout) %in% remove)]
+```
+After removing NA values we also remove useless identifiers like time stamps and names.
+
+
+### Correlated Columns and zero variance
+```{r}
+zeroVar= nearZeroVar(trainout[sapply(trainout, is.numeric)], saveMetrics = TRUE) ##convert to number
+training.nonzerovar = trainout[,zeroVar[, 'nzv']==0]
+dim(training.nonzerovar)
+```
+This removes features that are highly correlated. Let's plot them first
+```{r}
+zeroVar= nearZeroVar(trainout[sapply(trainout, is.numeric)], saveMetrics = TRUE)
+training.nonzerovar = trainout[,zeroVar[, 'nzv']==0] ##remove zero variance columns
+dim(training.nonzerovar)
+corrMatrix <- cor(na.omit(training.nonzerovar[sapply(training.nonzerovar, is.numeric)]))
+
+corrDF <- expand.grid(row = 1:52, col = 1:52)
+corrDF$correlation <- as.vector(corrMatrix)
+levelplot(correlation ~ row+ col, corrDF)
+```
+We can see some trends where columns are correlated, these can be removed for a particular threshold
+```{r,echo=FALSE,message=FALSE}
+removecor <- findCorrelation(corrMatrix, cutoff = .90, verbose = FALSE)
+trainout <- training.nonzerovar[,-removecor] ##removes correlated values
+dim(trainout)
+```
+
+
+### Attempt 1: PCA and CART
+```{r}
+pp<-preProcess(trainout[,-46],method="pca")## pca applied
+trainz<-predict(pp,trainout[,-46])
+trainz<-cbind(trainz,trainout[,46]) ## dataset obtained
+colnames(trainz)<-c(colnames(trainz)[1:25],"classe")
+dim(trainz)
+set.seed(123)
+trainindex1<-createDataPartition(trainz$classe,p=0.7,list=FALSE)
+train1<-trainz[trainindex1,]
+test1<-trainz[-trainindex1,]
+```
+Here we apply PCA and we can see that the dimensionality is reduced. Whether this helps or not can be checked next
+
+```{r}
+model1<-train(classe~.,method="rpart",data=train1) #model made
+output1<-predict(model1,newdata=test1)
+table(output1)
+confusionMatrix(output1,test1$classe)
+```
+Obviously it doesn't work well! after that horrible attempt, lets try random forest
+
+### Random Forest
+```{r}
+trainindex<-createDataPartition(trainout$classe,p=0.7,list=FALSE)
+train<-trainout[trainindex,]
+test<-trainout[-trainindex,]
+set.seed(123)
+model2<-randomForest(classe~.,data=train,ntree=100, importance=TRUE)
+model2
+```
+We can already see more accuracy with the predictions from the start. Lets see what features are important to the model
+
+
+```{r}
+varImpPlot(model2,)
+```
+
+
+### Answers
+
+
+Let's predict our answers and check the conclusions
+
+
+```{r}
+answers <- predict(model2, testdata)
+answers
+
+```
+
+
+### End
+
+To conclude, we see that PCA and CART dont work as well as randomforest on the first try.
+
